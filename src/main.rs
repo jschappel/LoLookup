@@ -12,7 +12,7 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use serde::Deserialize;
 use console::{Style, StyledObject};
 
-const API_KEY: &str = "PLACEHOLDER";
+const API_KEY: &str = "Placeholder";
 const X_RIOT_TOKEN: &'static str = "X-Riot-Token";
 const ACC_COLS: [&str; 5] = ["Level", "Rank", "W/L", "LP", "Hot Streak"];
 const GAME_COLS: [&str; 5] = ["Username", "Rank", "LP", "W/L", "Hot Streak"];
