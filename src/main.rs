@@ -105,7 +105,7 @@ async fn main() -> Result<()> {
                 return Ok(())
             }
         },
-        "jelp" => {
+        "help" => {
             println!("Available commands:");
             println!("  lookup <username>      => returns account statistics");
             println!("  game <username>        => returns data about current game");
