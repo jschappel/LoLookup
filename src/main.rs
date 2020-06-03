@@ -6,15 +6,16 @@ extern crate console;
 use std::result;
 use std::fmt;
 use std::env;
-
+use std::collections::HashMap;
 
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::Deserialize;
 use console::{Style, StyledObject};
+use futures::future::{join_all, join};
 
-const API_KEY: &str = "Placeholder";
+const API_KEY: &str = "PLACEHOLDER";
 const X_RIOT_TOKEN: &'static str = "X-Riot-Token";
-const ACC_COLS: [&str; 5] = ["Level", "Rank", "W/L", "LP", "Hot Streak"];
+const ACC_COLS: [&str; 6] = ["Level", "Rank", "W/L", "LP", "Hot Streak", "Top Role"];
 const GAME_COLS: [&str; 5] = ["Username", "Rank", "LP", "W/L", "Hot Streak"];
 const FIRE: &'static str = "🔥";
 const COLD: &'static str = "🧊";
@@ -44,6 +45,7 @@ macro_rules! gameHeader {
         println!("{:-<18}+{:-<8}+{:-<8}+{:-<8}+{:-<12}", "-", "-", "-", "-", "-");
     };
 }
+
 
 macro_rules! emoji {
     ($e:expr, $o:expr) => {
@@ -95,11 +97,9 @@ async fn main() -> Result<()> {
             }
         },
         "history" => {
-            if let Some(username) = username {
-                match look_up_history(&username).await{
-                    Ok(_game) => (),
-                    Err(e) => println!("{}", e),
-                }
+            if let Some(_username) = username {
+                println!("Not implemented yet.");
+                return Ok(())
             } else {
                 println!("Must supply username.");
                 return Ok(())
@@ -121,39 +121,64 @@ async fn main() -> Result<()> {
 async fn look_up_game(username: &str) -> Result<Game> {
     let account = get_account(username).await?;
     let json = get_current_game(&account.id).await?;
-    let game = create_game(&json.participants, &json.gameMode).await;
+    let game = create_game(&json.participants, &json.gameMode, &json.gameType).await;
     Ok(game)
 }
 
 
+async fn create_game(teammates: &Vec<ParticipantJSON>, mode: &str, game_type: &str) -> Game {
+    let futures = teammates.iter().map(|p| get_account_rank(&p.summonerId)).collect::<Vec<_>>();
+    let result = join_all(futures).await;
 
-async fn create_game(teammates: &Vec<ParticipantJSON>, mode: &str) -> Game {
     let mut red: Vec<Participant> = Vec::new();
     let mut blue: Vec<Participant> = Vec::new();
-    for player in teammates {
+    for (player, data) in teammates.iter().zip(result.into_iter()) {
+        let rank = data.expect("Error looking up user");
         if player.teamId == 100 {
-            let rank = get_account_rank(&player.summonerId).await.expect("Error looking up user");
             red.push(Participant::new(false, player.summonerName.clone(), rank));
         } else {
-            let rank = get_account_rank(&player.summonerId).await.expect("Error looking up user");
-            blue.push(Participant::new(true, player.summonerName.clone(), rank));
+            blue.push(Participant::new(false, player.summonerName.clone(), rank));
         }
     }
     Game {
         red,
         blue,
         mode: mode.to_string(), 
+        game_type: game_type.to_string(),
     }
 }
 
+// Returns the most played role
+async fn get_most_played_role(account_id: &str) -> result::Result<String, ProgramError> {
+    let history = get_history(account_id).await?;
+    let mut map: HashMap<String, i8> = HashMap::new();
+    
+    let mut adc = 0;
+    let mut sup = 0;
+    for game in history.matches {
+        if let Some(r) = map.get_mut(&game.lane) {
+            if game.lane == "BOTTOM" {
+                if game.role == "DUO_CARRY" { adc+=1; }
+                else { sup+=1; }
+            }
+            *r+=1;
+        } else {
+            map.insert(game.lane, 1);
+        }
+    }
 
-async fn look_up_history(username: &str) -> result::Result<(), ProgramError> {
-    let account = get_account(username).await?;
-    let _history = get_history(&account.accountId).await?;
-    println!("Feature not yet finished");
-    //println!("{:#?}", history);
-    //println!("{}", history.matches.len());
-    Ok(())
+    let mut max = ("", -1);
+    for (key, value) in map.iter(){
+        if *value > max.1 {
+            max = (key, *value);
+        }
+    }
+
+    match max.0 {
+        "BOTTOM" if adc > sup => Ok(String::from("ADC")),
+        "BOTTOM"    => Ok(String::from("SUPPORT")),
+        _           => Ok(String::from(max.0))
+    }
 }
 
 async fn get_history(account_id: &str) -> Result<HistoryJSON>{
@@ -165,15 +190,20 @@ async fn get_history(account_id: &str) -> Result<HistoryJSON>{
             let data = res.text().await.or_else(|_| Err(ProgramError::DeserializeError))?;
             Ok(serde_json::from_str(&data[..]).unwrap()) //.or_else(|_| Err(ProgramError::DeserializeError))?)
         },
-        _   => Err(ProgramError::InvalidResponse), 
+        _   => { println!("{}", res.status().as_u16()); return Err(ProgramError::InvalidResponse)}, 
     }
 }
 
 
 async fn look_up_user(username: &str) -> Result<UserAccount> {
     let account = get_account(username).await?;
-    let rank = get_account_rank(&account.id).await?;
-    Ok(UserAccount::new(account, rank))
+    let rank = get_account_rank(&account.id);
+    let role = get_most_played_role(&account.accountId);
+    let result = join(rank, role).await;
+    if let (Ok(rank), Ok(role)) = result {
+        return Ok(UserAccount::new(account, rank, role))
+    }
+    Err(ProgramError::InvalidResponse)
 }
 
 async fn get_current_game(summoner_id: &str) -> result::Result<GameJSON, ProgramError> {
@@ -189,6 +219,18 @@ async fn get_current_game(summoner_id: &str) -> result::Result<GameJSON, Program
         },
         _   => Err(ProgramError::InvalidResponse),
     }
+}
+
+//TODO: Future hookup?
+async fn _get_rank_and_posn(account: &Account) -> Result<(String, Rank)> {
+    let rank = get_account_rank(&account.id);
+    let posn = get_most_played_role(&account.accountId);
+
+    let res = join(rank, posn).await;
+    if let (Ok(rank), Ok(role)) = res {
+        return Ok((role, rank));   
+    }
+    Err(ProgramError::BadResponse)
 }
 
 async fn get_account_rank(summoner_id: &str) -> Result<Rank> {
@@ -266,21 +308,22 @@ impl fmt::Display for ProgramError {
 struct UserAccount {
     account: Account,
     rank: Rank,
+    top_role: String,
 }
 
 impl UserAccount {
-    fn new(account: Account, rank: Rank) -> Self {
-        UserAccount { account, rank }
+    fn new(account: Account, rank: Rank, top_role: String) -> Self {
+        UserAccount { account, rank, top_role }
     }
 
     fn display_console(&self) {
         let yellow: Style = Style::new().yellow();
-        println!("{:=^47}", yellow.apply_to(&self.account.name));
-        println!("{0: ^6} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^10}", ACC_COLS[0], ACC_COLS[1],
-        ACC_COLS[2], ACC_COLS[3], ACC_COLS[4]);
-        println!("{:-<7}+{:-<8}+{:-<8}+{:-<8}+{:-<12}", "-", "-", "-", "-", "-");
-        println!("{0: ^6} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^10}", self.account.summonerLevel,
-        self.rank.print_rank(), self.rank.style_wl(), self.rank.leaguePoints, self.rank.display_streak());
+        println!("{:=^58}", yellow.apply_to(&self.account.name));
+        println!("{0: ^6} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^10} | {5: ^10}", ACC_COLS[0], ACC_COLS[1],
+        ACC_COLS[2], ACC_COLS[3], ACC_COLS[4], ACC_COLS[5]);
+        println!("{:-<7}+{:-<8}+{:-<8}+{:-<8}+{:-<12}+{:-<10}", "-", "-", "-", "-", "-", "-");
+        println!("{0: ^6} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^9} | {5: ^10}", self.account.summonerLevel,
+        self.rank.print_rank(), self.rank.style_wl(), self.rank.leaguePoints, self.rank.display_streak(), self.top_role);
     }
 }
 
@@ -325,6 +368,7 @@ struct HistoryJSON {
 }
 
 
+
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
 struct MatchJSON {
@@ -350,6 +394,7 @@ struct Game {
     red: Vec<Participant>,
     blue: Vec<Participant>,
     mode: String,
+    game_type: String,
 }
 
 impl Game {
@@ -357,6 +402,8 @@ impl Game {
         let red: Style = Style::new().red();
         let cyan: Style = Style::new().cyan();
 
+        println!("Game Mode: {}", self.mode);           // Ranked: CLASSIC MATCHED_GAME    ARAM MATCHED_GAME
+        println!("Game Type: {}", self.game_type);
         gameHeader!("Red Team", red);
         for person in &self.red {
             Self::display_row(&person);
@@ -369,7 +416,7 @@ impl Game {
     }
 
     fn display_row(p: &Participant) {
-        println!("{0: <17} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^10}", p.summonerName,
+        println!("{0: <17} | {1: ^6} | {2: ^6} | {3: ^6} | {4}", p.summonerName,
         p.rank.print_rank(), p.rank.leaguePoints, p.rank.style_wl(), p.rank.display_streak());
     }
 }

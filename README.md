@@ -1,5 +1,5 @@
 # LoLookup
-A lightweight command line application for looking up League of Legends account information and in game opponents.
+A fast, lightweight command line application for looking up League of Legends account information and in game opponents.
 LoLookup takes a minimalist approach by only showing you the most relevant information.
 
 
@@ -9,7 +9,7 @@ LoLookup takes a minimalist approach by only showing you the most relevant infor
 
 ### Installation
 1) download the lol.exe file.
-2) Save it to a folder names Lolookup on your computer
+2) Save it to a folder named Lolookup on your computer
 3) Add the path the Lolookup folder as a env variable on your computer 
 4) open a cmd prompt and type ```lol help```
 
@@ -18,7 +18,7 @@ Lookup an accounts current stats:<br/>
 ![lookup](images/lookup.PNG)
 
 
-Look an accounts in game opponents:<br/>
+Lookup an accounts in game opponents:<br/>
 ![game](images/game.PNG)
 
 
