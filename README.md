@@ -8,10 +8,10 @@ LoLookup takes a minimalist approach by only showing you the most relevant infor
 - Game information
 
 ### Installation
-1) download the lol.exe file.
+1) Download the lol.exe file.
 2) Save it to a folder named Lolookup on your computer
 3) Add the path the Lolookup folder as a env variable on your computer 
-4) open a cmd prompt and type ```lol help```
+4) Open a cmd prompt and type ```lol help```
 
 ### Screenshots
 Lookup an accounts current stats:<br/>
