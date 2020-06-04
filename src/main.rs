@@ -22,6 +22,7 @@ const COLD: &'static str = "🧊";
 
 type Result<T> = result::Result<T, ProgramError>;
 
+
 macro_rules! fetch {
     ($url:expr) => {
         {
