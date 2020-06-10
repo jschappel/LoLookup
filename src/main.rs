@@ -3,22 +3,26 @@ extern crate serde;
 extern crate serde_json;
 extern crate console;
 
+mod champ;
+
 use std::result;
 use std::fmt;
 use std::env;
 use std::collections::HashMap;
-
+use champ::champion_map;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::Deserialize;
 use console::{Style, StyledObject};
 use futures::future::{join_all, join};
 
-const API_KEY: &str = "PLACEHOLDER";
+const API_KEY: &str = "";
 const X_RIOT_TOKEN: &'static str = "X-Riot-Token";
 const ACC_COLS: [&str; 6] = ["Level", "Rank", "W/L", "LP", "Hot Streak", "Top Role"];
 const GAME_COLS: [&str; 5] = ["Username", "Rank", "LP", "W/L", "Hot Streak"];
+const MATCH_HISTORY_COLS: [&str; 4] = ["Role", "Mode", "Champion", "Outcome"];
 const FIRE: &'static str = "🔥";
 const COLD: &'static str = "🧊";
+const DEFAULT_CHAMP: &'static str = "Unknown Champ";
 
 type Result<T> = result::Result<T, ProgramError>;
 
@@ -98,8 +102,11 @@ async fn main() -> Result<()> {
             }
         },
         "history" => {
-            if let Some(_username) = username {
-                println!("Not implemented yet.");
+            if let Some(username) = username {
+                match look_up_match_history(&username).await {
+                    Ok(history) =>  history.display_console(),
+                    Err(e) => println!("{}", e),
+                }
                 return Ok(())
             } else {
                 println!("Must supply username.");
@@ -222,17 +229,70 @@ async fn get_current_game(summoner_id: &str) -> result::Result<GameJSON, Program
     }
 }
 
-//TODO: Future hookup?
-async fn _get_rank_and_posn(account: &Account) -> Result<(String, Rank)> {
-    let rank = get_account_rank(&account.id);
-    let posn = get_most_played_role(&account.accountId);
 
-    let res = join(rank, posn).await;
-    if let (Ok(rank), Ok(role)) = res {
-        return Ok((role, rank));   
+fn determine_role(role: &str, lane: &str) -> String {
+    match lane {
+        "BOTTOM" => match role {
+            "DUO_SUPPORT" => "SUPPORT".to_string(),
+            _ => "ADC".to_string(),
+        }
+        _ => lane.to_string(),
     }
-    Err(ProgramError::BadResponse)
 }
+
+async fn get_match_data(match_id: u64) -> Result<MatchDataJSON> {
+    let url = String::from("https://na1.api.riotgames.com/lol/match/v4/matches/") + &match_id.to_string();
+    let res = fetch!(url)?;
+
+    match res.status().as_u16() {
+        200 => {
+            let data = res.text().await.or_else(|_| Err(ProgramError::DeserializeError))?;
+            let match_data: MatchDataJSON = serde_json::from_str(&data[..]).or_else(|_| Err(ProgramError::DeserializeError))?;
+            Ok(match_data)
+        },
+        404 => Err(ProgramError::InvalidAccount),
+        _   => Err(ProgramError::BadResponse),
+    }
+}
+
+async fn look_up_match_history(username: &str) -> Result<UserGames> {
+    let account = get_account(username).await?;
+    let history = get_history(&account.accountId).await?;
+    let games = history.matches.iter().map(|m| get_match_data(m.gameId)).collect::<Vec<_>>();
+    let result = join_all(games).await;
+
+    let mut recent_games = Vec::new();
+    for (g, m) in history.matches.iter().zip(result.into_iter()) {
+        if let Ok(m) = m{
+            let is_win = match &m.teams[0].win[..] {
+                "Win"   => true,
+                _ => false,
+            };
+
+            //see if it was a win for the user.
+            let par_pos = m.participantIdentities.iter().position(|p| p.player.accountId == account.accountId).unwrap();
+            let id = m.participantIdentities[par_pos].participantId;
+            let mut res = false; // Result of the user winning or losing
+            for p in m.participants {
+                if p.participantId == id {
+                    res = match p.teamId {
+                        100 => is_win,
+                        _ => !is_win,
+                    };
+                    break;
+                }
+            }
+            recent_games.push(UserMatch::new(determine_role(&g.role, &g.lane), g.queue, g.champion, Some(res)))
+        } else {
+            recent_games.push(UserMatch::new(determine_role(&g.role, &g.lane), g.queue, g.champion, None))
+        }
+    }
+    // let recent_games: Vec<UserMatch> = history.matches.into_iter()
+    //     .map(|game| UserMatch::new(determine_role(&game.role, &game.lane), game.queue, game.champion, res))
+    //     .collect();
+    Ok(UserGames{ games: recent_games, username: String::from(username) })
+}
+
 
 async fn get_account_rank(summoner_id: &str) -> Result<Rank> {
     let url = String::from("https://na1.api.riotgames.com/lol/league/v4/entries/by-summoner/") + summoner_id;
@@ -275,6 +335,17 @@ fn utf8_supported() -> bool {
     }
 }
 
+fn format_game_id(id: u16) -> String {
+    match id {
+        400 => "Normal Draft".to_string(),
+        410 => "Ranked Dynamic".to_string(),
+        420 => "Ranked Solo".to_string(),
+        430 => "Blink Pick".to_string(),
+        440 => "Ranked Flex".to_string(),
+        _ => "Unknown".to_string(),
+    }
+}
+
 #[derive(Debug)]
 pub enum ProgramError {
     DeserializeError,
@@ -302,7 +373,103 @@ impl fmt::Display for ProgramError {
     }
 }
 
+// Wrapper struct to display the user games
+struct UserGames {
+    username: String,
+    games: Vec<UserMatch>,
+}
 
+impl UserGames {
+    fn display_console(&self) -> () {
+        let yellow: Style = Style::new().yellow();
+        let label = format!(" {} Match History ", &self.username);
+        let map = champion_map();
+        println!("{:=^68}", yellow.apply_to(&label));
+        println!("{0: ^10} | {1: ^15} | {2: ^20} | {3: ^15}", MATCH_HISTORY_COLS[0], MATCH_HISTORY_COLS[1],
+        MATCH_HISTORY_COLS[2], MATCH_HISTORY_COLS[3]);
+        println!("{:-<11}+{:-<17}+{:-<22}+{:-<16}", "-", "-", "-", "-");
+        for game in &self.games {
+            Self::display_row(game, &map);
+        }
+    }
+
+    fn display_row(game: &UserMatch, map: &HashMap<u16, String>) {
+        let temp = String::from(DEFAULT_CHAMP);
+        let champ = map.get(&game.champ).unwrap_or_else(|| &temp);
+        println!("{0: ^10} | {1: ^15} | {2: ^20} | {3: ^15}", game.role, format_game_id(game.game_mode),
+        champ, game.get_outcome());
+    }
+}
+
+#[allow(non_snake_case)]
+#[derive(Deserialize, Debug)]
+// Represents a match fetch given the match id
+struct MatchDataJSON {
+    teams: Vec<TeamJSON>,
+    participants: Vec<MatchParticipantJSON>,
+    participantIdentities: Vec<ParticipantIdentityJSON>,
+}
+
+#[allow(non_snake_case)]
+#[derive(Deserialize, Debug)]
+struct TeamJSON {
+    teamId: u16,
+    win: String,
+}
+
+#[allow(non_snake_case)]
+#[derive(Deserialize, Debug)]
+struct MatchParticipantJSON {
+    participantId: u16,
+    teamId: u16,
+}
+
+#[allow(non_snake_case)]
+#[derive(Deserialize, Debug)]
+struct ParticipantIdentityJSON {
+    participantId: u16,
+    player: PlayerJSON,
+}
+
+#[allow(non_snake_case)]
+#[derive(Deserialize, Debug)]
+struct PlayerJSON {
+    accountId: String,
+    summonerName: String,
+    summonerId: String,
+}
+
+
+#[derive(Debug)]
+// A single game that the user played in
+struct UserMatch {
+    role: String,
+    game_mode: u16,
+    champ: u16,
+    outcome: Option<bool>, // true if a win
+}
+
+impl UserMatch {
+    //TODO: Finish implementation
+    fn new(role: String, mode: u16, champ: u16, outcome: Option<bool>) -> Self {
+        UserMatch {
+            role: role,
+            game_mode: mode,
+            champ: champ,
+            outcome: outcome,
+        }
+    }
+
+    fn get_outcome(&self) -> &str {
+        match self.outcome {
+            Some(v) => match v {
+                true => "Win",
+                _ => "Loss",
+            },
+            None => "Unavaliable"
+        }
+    }
+}
 
 
 #[derive(Debug)]
@@ -323,8 +490,14 @@ impl UserAccount {
         println!("{0: ^6} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^10} | {5: ^10}", ACC_COLS[0], ACC_COLS[1],
         ACC_COLS[2], ACC_COLS[3], ACC_COLS[4], ACC_COLS[5]);
         println!("{:-<7}+{:-<8}+{:-<8}+{:-<8}+{:-<12}+{:-<10}", "-", "-", "-", "-", "-", "-");
-        println!("{0: ^6} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^9} | {5: ^10}", self.account.summonerLevel,
-        self.rank.print_rank(), self.rank.style_wl(), self.rank.leaguePoints, self.rank.display_streak(), self.top_role);
+        if utf8_supported(){
+            println!("{0: ^6} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^9} | {5: ^10}", self.account.summonerLevel,
+            self.rank.print_rank(), self.rank.style_wl(), self.rank.leaguePoints, self.rank.display_streak(), self.top_role);
+        } else {
+            println!("{0: ^6} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^10} | {5: ^10}", self.account.summonerLevel,
+            self.rank.print_rank(), self.rank.style_wl(), self.rank.leaguePoints, self.rank.display_streak(), self.top_role);
+        }
+       
     }
 }
 
@@ -373,7 +546,7 @@ struct HistoryJSON {
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
 struct MatchJSON {
-    queue: u32,
+    queue: u16,
     season: u8,
     role: String,
     lane: String,

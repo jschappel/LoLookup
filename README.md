@@ -6,6 +6,12 @@ LoLookup takes a minimalist approach by only showing you the most relevant infor
 ### Features
 - Account Statistics
 - Game information
+- Recent game history
+
+### Commands
+- lookup <username>
+- game <username>
+- history <username>
 
 ### Installation
 1) Download the lol.exe file.
