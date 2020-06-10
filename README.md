@@ -9,9 +9,9 @@ LoLookup takes a minimalist approach by only showing you the most relevant infor
 - Recent game history
 
 ### Commands
-- lookup <username>
-- game <username>
-- history <username>
+- lookup &lt;username&gt;
+- game &lt;username&gt;
+- history &lt;username&gt;
 
 ### Installation
 1) Download the lol.exe file.
