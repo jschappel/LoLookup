@@ -16,7 +16,7 @@ use serde::Deserialize;
 use console::{Style, StyledObject};
 use futures::future::{join_all, join};
 
-const API_KEY: &str = "";
+const API_KEY: &str = "ADD KEY HERE";
 const X_RIOT_TOKEN: &'static str = "X-Riot-Token";
 const ACC_COLS: [&str; 6] = ["Level", "Rank", "W/L", "LP", "Hot Streak", "Top Role"];
 const GAME_COLS: [&str; 5] = ["Username", "Rank", "LP", "W/L", "Hot Streak"];
