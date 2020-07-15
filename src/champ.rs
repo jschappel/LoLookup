@@ -1,18 +1,60 @@
 /// This file contains all data for champions
 use std::collections::HashMap;
 
+#[macro_export]
 macro_rules! hashmap {
-    ($($key:expr => $val:expr),+ $(,)?) => {
+    (string $($key:expr => $val:expr),+ $(,)?) => {
         {
             let mut map = HashMap::new();
             $(map.insert($key, $val.to_string());)*
             map
         }
     };
+    ($($key:expr => $val:expr),+ $(,)?) => {
+        {
+            let mut map = HashMap::new();
+            $(map.insert($key, $val);)*
+            map
+        }
+    };
+}
+
+
+pub fn rank_map() -> HashMap<String, u8> {
+    hashmap!(
+        "N/A".to_string() => 0,
+        "I_IV".to_string() => 1,
+        "I_III".to_string() => 2,
+        "I_II".to_string() => 3,
+        "I_I".to_string() => 4,
+        "B_IV".to_string() => 5,
+        "B_III".to_string() => 6,
+        "B_II".to_string() => 7,
+        "B_I".to_string() => 8,
+        "S_IV".to_string() => 9,
+        "S_III".to_string() => 10,
+        "S_II".to_string() => 11,
+        "S_I".to_string()  => 12,
+        "G_IV".to_string() => 13,
+        "G_III".to_string() => 14,
+        "G_II".to_string() => 15,
+        "G_I".to_string()  => 16,
+        "P_IV".to_string() => 17,
+        "P_III".to_string() => 18,
+        "P_II".to_string() => 19,
+        "P_I".to_string()  => 20,
+        "D_IV".to_string() => 21,
+        "D_III".to_string() => 22, 
+        "D_II".to_string() => 23,
+        "D_I".to_string() => 24,
+        "MASTER".to_string() => 25,
+        "GRANDMASTER".to_string() => 26,
+        "CHALLENGER".to_string() => 27,
+    )
 }
 
 pub fn champion_map() -> HashMap<u16, String> {
-    let map = hashmap!(
+    let map = hashmap!( string
         1 => "Annie",
         2 => "Olaf",
         3 => "Galio",

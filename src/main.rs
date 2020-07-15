@@ -8,6 +8,7 @@ mod champ;
 use std::result;
 use std::fmt;
 use std::env;
+use std::{thread, time};
 use std::collections::HashMap;
 use champ::champion_map;
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -23,6 +24,7 @@ const MATCH_HISTORY_COLS: [&str; 4] = ["Role", "Mode", "Champion", "Outcome"];
 const FIRE: &'static str = "🔥";
 const COLD: &'static str = "🧊";
 const DEFAULT_CHAMP: &'static str = "Unknown Champ";
+const SLEEP_DUR: u64 = 300;
 
 type Result<T> = result::Result<T, ProgramError>;
 
@@ -138,8 +140,8 @@ async fn create_game(teammates: &Vec<ParticipantJSON>, mode: &str, game_type: &s
     let futures = teammates.iter().map(|p| get_account_rank(&p.summonerId)).collect::<Vec<_>>();
     let result = join_all(futures).await;
 
-    let mut red: Vec<Participant> = Vec::new();
     let mut blue: Vec<Participant> = Vec::new();
+    let mut red: Vec<Participant> = Vec::new();
     for (player, data) in teammates.iter().zip(result.into_iter()) {
         let rank = data.expect("Error looking up user");
         if player.teamId == 100 {
@@ -240,6 +242,7 @@ fn determine_role(role: &str, lane: &str) -> String {
     }
 }
 
+// retrieves the match data for a given id
 async fn get_match_data(match_id: u64) -> Result<MatchDataJSON> {
     let url = String::from("https://na1.api.riotgames.com/lol/match/v4/matches/") + &match_id.to_string();
     let res = fetch!(url)?;
@@ -258,6 +261,9 @@ async fn get_match_data(match_id: u64) -> Result<MatchDataJSON> {
 async fn look_up_match_history(username: &str) -> Result<UserGames> {
     let account = get_account(username).await?;
     let history = get_history(&account.accountId).await?;
+    // Need to pause the main thread so the API key usage does not exceed the limit
+    let sleep_time = time::Duration::from_millis(SLEEP_DUR);
+    thread::sleep(sleep_time);
     let games = history.matches.iter().map(|m| get_match_data(m.gameId)).collect::<Vec<_>>();
     let result = join_all(games).await;
 
@@ -573,16 +579,30 @@ struct Game {
 
 impl Game {
     fn display_console(&self) {
+        let rank_map = champ::rank_map();
         let red: Style = Style::new().red();
         let cyan: Style = Style::new().cyan();
-
+        let avg_red = self.red.iter().fold(0, |acc, v| acc + rank_map.get(&v.rank.print_rank()).unwrap()) / 5;
+        let avg_blue = self.blue.iter().fold(0, |acc, v| acc + rank_map.get(&v.rank.print_rank()).unwrap()) / 5;
+        let mut blue_rank = "N/A";
+        let mut red_rank = "N/A";
+        for (key, val)  in rank_map.iter() {
+            if *val == avg_red {
+                red_rank = key;
+            }
+            if *val == avg_blue {
+                blue_rank = key;
+            }
+        }
         println!("Game Mode: {}", self.mode);           // Ranked: CLASSIC MATCHED_GAME    ARAM MATCHED_GAME
         println!("Game Type: {}", self.game_type);
+        println!("Avg Team Rank: {}", red_rank);
         gameHeader!("Red Team", red);
         for person in &self.red {
             Self::display_row(&person);
         }
         println!("\n");
+        println!("Avg Team Rank: {}", blue_rank);
         gameHeader!("Blue Team", cyan);
         for person in &self.blue {
             Self::display_row(&person);
