@@ -19,7 +19,6 @@ macro_rules! hashmap {
     };
 }
 
-
 pub fn rank_map() -> HashMap<String, u8> {
     hashmap!(
         "N/A".to_string() => 0,
@@ -44,7 +43,7 @@ pub fn rank_map() -> HashMap<String, u8> {
         "P_II".to_string() => 19,
         "P_I".to_string()  => 20,
         "D_IV".to_string() => 21,
-        "D_III".to_string() => 22, 
+        "D_III".to_string() => 22,
         "D_II".to_string() => 23,
         "D_I".to_string() => 24,
         "MASTER".to_string() => 25,
