@@ -15,11 +15,12 @@ use std::env;
 use std::fmt;
 use std::result;
 use std::{thread, time};
+use std::convert::From;
 
 const API_KEY: &str = "";
 const X_RIOT_TOKEN: &'static str = "X-Riot-Token";
 const ACC_COLS: [&str; 6] = ["Level", "Rank", "W/L", "LP", "Hot Streak", "Top Role"];
-const GAME_COLS: [&str; 5] = ["Username", "Rank", "LP", "W/L", "Hot Streak"];
+const GAME_COLS: [&str; 6] = ["Username", "Rank", "LP", "W/L", "Champion", "Hot Streak"];
 const MATCH_HISTORY_COLS: [&str; 4] = ["Role", "Mode", "Champion", "Outcome"];
 const FIRE: &'static str = "🔥";
 const COLD: &'static str = "🧊";
@@ -45,14 +46,14 @@ macro_rules! fetch {
 
 macro_rules! gameHeader {
     ($team:expr, $i:ident) => {
-        println!("{:=^59}", $i.apply_to($team));
+        println!("{:=^81}", $i.apply_to($team));
         println!(
-            "{0: ^17} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^10}",
-            GAME_COLS[0], GAME_COLS[1], GAME_COLS[2], GAME_COLS[3], GAME_COLS[4]
+            "{0: ^17} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^20} | {5: ^10}",
+            GAME_COLS[0], GAME_COLS[1], GAME_COLS[2], GAME_COLS[3], GAME_COLS[4], GAME_COLS[5]
         );
         println!(
-            "{:-<18}+{:-<8}+{:-<8}+{:-<8}+{:-<12}",
-            "-", "-", "-", "-", "-"
+            "{:-<18}+{:-<8}+{:-<8}+{:-<8}+{:-<22}+{:-<12}",
+            "-", "-", "-", "-", "-", "-"
         );
     };
 }
@@ -146,9 +147,9 @@ async fn create_game(teammates: &Vec<ParticipantJSON>, mode: &str, game_type: &s
     for (player, data) in teammates.iter().zip(result.into_iter()) {
         let rank = data.expect("Error looking up user");
         if player.teamId == 100 {
-            red.push(Participant::new(false, player.summonerName.clone(), rank));
+            red.push(Participant::new(false, player.summonerName.clone(), rank, player.championId));
         } else {
-            blue.push(Participant::new(false, player.summonerName.clone(), rank));
+            blue.push(Participant::new(false, player.summonerName.clone(), rank, player.championId));
         }
     }
     Game {
@@ -621,6 +622,7 @@ struct ParticipantJSON {
     teamId: i32,
     summonerName: String,
     summonerId: String,
+    championId: u16,
 }
 
 #[allow(non_snake_case)]
@@ -628,14 +630,16 @@ struct ParticipantJSON {
 struct Participant {
     team: bool,
     summonerName: String,
+    championId: u16,
     rank: Rank,
 }
 
 impl Participant {
-    fn new(team: bool, name: String, rank: Rank) -> Self {
+    fn new(team: bool, name: String, rank: Rank, champ_id: u16) -> Self {
         Participant {
             team,
             summonerName: name,
+            championId: champ_id,
             rank,
         }
     }
@@ -676,6 +680,7 @@ struct Game {
 
 impl Game {
     fn display_console(&self) {
+        let champ_map = champ::champion_map();
         let rank_map = champ::rank_map();
         let red: Style = Style::new().red();
         let cyan: Style = Style::new().cyan();
@@ -701,24 +706,25 @@ impl Game {
         println!("Avg Team Rank: {}", red_rank);
         gameHeader!("Red Team", red);
         for person in &self.red {
-            Self::display_row(&person);
+            Self::display_row(&person, &champ_map);
         }
         println!("\n");
         println!("Avg Team Rank: {}", blue_rank);
         gameHeader!("Blue Team", cyan);
         for person in &self.blue {
-            Self::display_row(&person);
+            Self::display_row(&person, &champ_map);
         }
     }
 
-    fn display_row(p: &Participant) {
+    fn display_row(p: &Participant, map: &HashMap<u16, String>) {
         println!(
-            "{0: <17} | {1: ^6} | {2: ^6} | {3: ^6} | {4}",
+            "{0: <17} | {1: ^6} | {2: ^6} | {3: ^6} | {4: ^20} | {5}",
             p.summonerName,
             p.rank.print_rank(),
             p.rank.leaguePoints,
             p.rank.style_wl(),
-            p.rank.display_streak()
+            map.get(&p.championId).unwrap(),
+            p.rank.display_streak(),
         );
     }
 }
