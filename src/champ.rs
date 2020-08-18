@@ -201,7 +201,9 @@ pub fn champion_map() -> HashMap<u16, String> {
         518 => "Neeko",
         523 => "Aphelios",
         555 => "Pyke",
+        777 => "Yone",
         875 => "Pyke",
+        876 => "Lillia",
     );
     map
 }
